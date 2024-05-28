@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 import math
+import numpy as np
 
 CANDIDATES = ["Pepperoni", "Brocolli", "Cheese"]
+N = len(CANDIDATES)
 
 def _write_output(res, col_name, header):
     res_df = pd.DataFrame.from_dict(res, orient='index', columns=[col_name])
@@ -88,7 +90,70 @@ def _compute_plurality(all_preferences):
     st.divider()
 
 
-def _compute_ky(all_preferences):
+
+def _count_pairwise(all_preferences):
+    # where d[i, j] is the number of people
+    # who prefer candidate i to j
+    d = np.zeros(shape=(N, N))
+    for i in range(N):
+        for j in range(N):
+            for player in all_preferences:
+                focal_candidate = CANDIDATES[i]
+                comparison_candidate = CANDIDATES[j]
+                if all_preferences[player][focal_candidate] > all_preferences[player][comparison_candidate]:
+                    d[i ,j] += 1
+    
+    return d
+
+def _get_strongest_path(d):
+    p = np.zeros(shape=(N, N))
+    # convert to only
+    # positive values
+    for i in range(N):
+        for j in range(N):
+            if i != j:
+                if d[i, j] > d[j, i]:
+                    p[i,j] = d[i,j]
+                else:
+                    p[i, j]  = 0 
+    
+    # we go through the entire grid 
+    # "N" times. Each time, we update the value in the grid
+    # by saying it is either the existing value, or, if we went through 
+    # the "ith" variable instead. The "ith" variable should 
+    # have consantly been updated as we went along
+    for i in range(N):
+        for j in range(N):
+            if i != j:
+                for k in range(N):
+                    if j != k and i != k:
+                        p[j, k] = max(p[j, k], min(p[j, i], p[i, k]))
+
+    return p
+
+def _compute_schulze(all_preferences):
+    d = _count_pairwise(all_preferences)
+    p = _get_strongest_path(d)
+
+    # initialize everything 
+    # with a negative 1
+    res = {}
+
+    # now that we have updated pairwise comparisons
+    # we tally the total wins in pairwise comparisons
+    for i in range(N):
+        wins = 0
+        for j in range(N):
+            if p[i, j] > p[j, i]:
+                wins += 1
+
+        res[CANDIDATES[i]] = wins
+    
+    _write_output(res, col_name="Wins", header="Schulze Winners")
+    
+
+
+def _ranked_pairs(all_preferences):
     pass
 
 def _compute_condorcet(all_preferences):
@@ -138,7 +203,8 @@ def compute_result(all_preferences, all_allocated_points, player_names, max_poin
     _compute_plurality(all_preferences)
     _compute_borda(all_preferences)
     _compute_quadratic(all_allocated_points)
-    _compute_ky(all_preferences)
+    _compute_schulze(all_preferences)
+    _ranked_pairs(all_preferences)
     
 
 
