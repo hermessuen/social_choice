@@ -61,7 +61,7 @@ def _compute_borda(all_preferences):
     res = {candidate:0 for candidate in CANDIDATES}
     for player in all_preferences:
         for k, v in all_preferences[player].items():
-            res[k] += v
+            res[k] +=  2- v
     _write_output(res, col_name="Borda Count", header= "Borda")
 
 
@@ -100,7 +100,7 @@ def _count_pairwise(all_preferences):
             for player in all_preferences:
                 focal_candidate = CANDIDATES[i]
                 comparison_candidate = CANDIDATES[j]
-                if all_preferences[player][focal_candidate] > all_preferences[player][comparison_candidate]:
+                if all_preferences[player][focal_candidate] < all_preferences[player][comparison_candidate]:
                     d[i ,j] += 1
     
     return d
