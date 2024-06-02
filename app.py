@@ -2,9 +2,16 @@ import streamlit as st
 import pandas as pd
 import math
 import numpy as np
+import itertools
 
-CANDIDATES = ["Pepperoni", "Brocolli", "Cheese"]
-N = len(CANDIDATES)
+st.session_state["CANDIDATES"] = ["Pepperoni", "Brocolli", "Cheese", "Marinara", "Peppers"]
+st.session_state["N"] = len(st.session_state["CANDIDATES"])
+
+
+# Set a global variable to store the processed input
+if 'st.session_state["CANDIDATES"]' not in st.session_state:
+    st.session_state['st.session_state["CANDIDATES"]'] = []
+
 
 def _write_output(res, col_name, header):
     res_df = pd.DataFrame.from_dict(res, orient='index', columns=[col_name])
@@ -17,14 +24,14 @@ def _write_output(res, col_name, header):
 def create_preference_form(player_name, options, max_points):
     st.subheader(f"Preference form for {player_name}")
     
-    N = len(options)
+    st.session_state["N"] = len(options)
     columns = st.columns(2)  
     preferences = []
     allocated_points = []
 
     with columns[0]:
         st.write("Ranking")
-        for i in range(N):
+        for i in range(st.session_state["N"]):
             preference = st.selectbox(
                 label=f"Rank {i+1}",
                 options=options,
@@ -35,7 +42,7 @@ def create_preference_form(player_name, options, max_points):
     
     with columns[1]:
         st.write("Points")
-        for i in range(N):
+        for i in range(st.session_state["N"]):
             points = st.number_input(
                 label=f"Points for {options[i]}",
                 min_value=0,
@@ -58,7 +65,7 @@ def create_preference_form(player_name, options, max_points):
 
 
 def _compute_borda(all_preferences):
-    res = {candidate:0 for candidate in CANDIDATES}
+    res = {candidate:0 for candidate in st.session_state["CANDIDATES"]}
     for player in all_preferences:
         for k, v in all_preferences[player].items():
             res[k] +=  2- v
@@ -67,7 +74,7 @@ def _compute_borda(all_preferences):
 
 
 def _compute_quadratic(all_allocated_points):
-    res = {candidate:0 for candidate in CANDIDATES}
+    res = {candidate:0 for candidate in st.session_state["CANDIDATES"]}
     for player in all_allocated_points:
         for allocated_points in all_allocated_points[player]:
             quadratic_points = math.floor(math.sqrt(allocated_points[1]))
@@ -91,26 +98,63 @@ def _compute_plurality(all_preferences):
 
 
 
+def _compute_ky_score(ranking, d):
+    score = 0
+    for i in range(st.session_state["N"]-1):
+        higher_candidate = ranking[i]
+        lower_candidate = ranking[i+1]
+        score += d[higher_candidate, lower_candidate]
+    return score
+
+def _compute_ky(all_preferences):
+    d = _count_pairwise(all_preferences)
+    
+    # permute all possible rankings 
+    rankings = list(itertools.permutations([i for i in range(st.session_state["N"])]))
+    scores = {i:0 for i in range(st.session_state["N"])}
+    for idx, ranking in enumerate(rankings):
+        score = _compute_ky_score(ranking, d)
+        scores[idx] = score
+
+    # take the top 3 rankings and
+    # show them with their corresponding scores 
+    sorted_scores = [k for k, v in sorted(scores.items(), key=lambda item: item[1])]
+    sorted_scores.reverse()
+ 
+    to_show = min(st.session_state["N"], 3)
+    top_rankings = [[st.session_state["CANDIDATES"][rank] for rank in rankings[sorted_scores[i]]] for i in range(to_show)]
+
+    top_scores = [scores[idx] for idx in  sorted_scores[:to_show]]
+    
+
+    df = pd.DataFrame({"Ordering": top_rankings, "Score": top_scores})
+    st.subheader("Kemeny-Young Method")
+    df.index = df.index + 1
+    df.index.name = "Rank"
+    st.dataframe(df, use_container_width=True)
+    st.divider()
+
+
 def _count_pairwise(all_preferences):
     # where d[i, j] is the number of people
     # who prefer candidate i to j
-    d = np.zeros(shape=(N, N))
-    for i in range(N):
-        for j in range(N):
+    d = np.zeros(shape=(st.session_state["N"], st.session_state["N"]))
+    for i in range(st.session_state["N"]):
+        for j in range(st.session_state["N"]):
             for player in all_preferences:
-                focal_candidate = CANDIDATES[i]
-                comparison_candidate = CANDIDATES[j]
+                focal_candidate = st.session_state["CANDIDATES"][i]
+                comparison_candidate = st.session_state["CANDIDATES"][j]
                 if all_preferences[player][focal_candidate] < all_preferences[player][comparison_candidate]:
                     d[i ,j] += 1
     
     return d
 
 def _get_strongest_path(d):
-    p = np.zeros(shape=(N, N))
+    p = np.zeros(shape=(st.session_state["N"], st.session_state["N"]))
     # convert to only
     # positive values
-    for i in range(N):
-        for j in range(N):
+    for i in range(st.session_state["N"]):
+        for j in range(st.session_state["N"]):
             if i != j:
                 if d[i, j] > d[j, i]:
                     p[i,j] = d[i,j]
@@ -118,14 +162,14 @@ def _get_strongest_path(d):
                     p[i, j]  = 0 
     
     # we go through the entire grid 
-    # "N" times. Each time, we update the value in the grid
+    # "st.session_state["N"]" times. Each time, we update the value in the grid
     # by saying it is either the existing value, or, if we went through 
     # the "ith" variable instead. The "ith" variable should 
     # have consantly been updated as we went along
-    for i in range(N):
-        for j in range(N):
+    for i in range(st.session_state["N"]):
+        for j in range(st.session_state["N"]):
             if i != j:
-                for k in range(N):
+                for k in range(st.session_state["N"]):
                     if j != k and i != k:
                         p[j, k] = max(p[j, k], min(p[j, i], p[i, k]))
 
@@ -141,20 +185,16 @@ def _compute_schulze(all_preferences):
 
     # now that we have updated pairwise comparisons
     # we tally the total wins in pairwise comparisons
-    for i in range(N):
+    for i in range(st.session_state["N"]):
         wins = 0
-        for j in range(N):
+        for j in range(st.session_state["N"]):
             if p[i, j] > p[j, i]:
                 wins += 1
 
-        res[CANDIDATES[i]] = wins
+        res[st.session_state["CANDIDATES"][i]] = wins
     
     _write_output(res, col_name="Wins", header="Schulze Winners")
     
-
-
-def _ranked_pairs(all_preferences):
-    pass
 
 def _compute_condorcet(all_preferences):
     res = {}
@@ -168,17 +208,17 @@ def _compute_condorcet(all_preferences):
     for player in all_preferences:
         all_preferences[player] = {value : index for index, value in enumerate(all_preferences[player])}
 
-    # perform the n^2 comparison
-    for focal_candidate in CANDIDATES:
+    # perform the st.session_state["N"]^2 comparison
+    for focal_candidate in st.session_state["CANDIDATES"]:
         wins = 0
-        for comparison_candidate in CANDIDATES:
+        for comparison_candidate in st.session_state["CANDIDATES"]:
             for player in all_preferences:
                 if all_preferences[player][focal_candidate] < all_preferences[player][comparison_candidate]:
                     wins += 1
 
         res[focal_candidate] = wins
 
-    _write_output(res, col_name="Wins", header="Concordet Winner(s)")
+    _write_output(res, col_name="Wins", header="h2h matchups won")
 
 
 def compute_result(all_preferences, all_allocated_points, player_names, max_points):
@@ -204,14 +244,23 @@ def compute_result(all_preferences, all_allocated_points, player_names, max_poin
     _compute_borda(all_preferences)
     _compute_quadratic(all_allocated_points)
     _compute_schulze(all_preferences)
-    _ranked_pairs(all_preferences)
+    _compute_ky(all_preferences)
     
 
 
 def main():
     st.title("Mathematics of Social Choice")
-    st.caption("Pizza Topping Showdown: Discover How Voting Algorithms Spice Up Your Choices!")
-    st.caption("Ever wondered how different social choice algorithms can change the outcome of a group decision? Our app lets you simulate votes with friends, rank your top pizza toppings, and see the effects of popular algorithms. Dive into the world of voting systems with a fun and delicious twist.")
+    st.caption("Lets rank some shit and see what wins")
+    user_input = st.text_input("Enter a comma-separated list for what you want to vote on:")
+    st.session_state["CANDIDATES"] = user_input.split(",")
+    st.session_state["N"] = len(user_input.split(","))
+    if "CANDIDATES" not in st.session_state:
+        st.session_state["CANDIDATES"] = ""
+        st.session_state["N"] = 0
+    
+
+    # st.caption("Pizza Topping Showdown: Discover How Voting Algorithms Spice Up Your Choices!")
+    # st.caption("Ever wondered how different social choice algorithms can change the outcome of a group decision? Our app lets you simulate votes with friends, rank your top pizza toppings, and see the effects of popular algorithms. Dive into the world of voting systems with a fun and delicious twist.")
     columns = st.columns(2)
     # Input: Number of people playing
     with columns[0]:
@@ -228,7 +277,7 @@ def main():
     all_preferences = {}
     all_allocted_points = {}
     for player in player_names:
-        preferences, allocated_points = create_preference_form(player, CANDIDATES, max_points=max_points)
+        preferences, allocated_points = create_preference_form(player, st.session_state["CANDIDATES"], max_points=max_points)
         all_allocted_points[player] = allocated_points
         all_preferences[player] = preferences
         preferences = [f'{e}' for e in preferences]
